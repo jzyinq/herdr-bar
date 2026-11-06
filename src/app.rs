@@ -959,7 +959,7 @@ impl Bar {
     fn compose(&mut self, width: isize, height: isize) -> Vec<String> {
         let preview_on = self.preview_enabled && self.config.fits_preview((width - 2).max(0), self.preview_chosen);
         self.preview_showing = preview_on;
-        let layout = compute_layout(width, height, preview_on, self.config.preview_width);
+        let layout = compute_layout(width, height, preview_on, self.config.preview_size(width));
         self.list_top = layout.list_top;
         self.list_height = layout.list_height;
         self.scroll_into_view(layout.list_height);

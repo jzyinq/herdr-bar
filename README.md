@@ -380,7 +380,7 @@ Optional. Write `config.json` in the plugin config directory
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `preview` | `"auto"` | `true`, `false` (hidden until `ctrl+o`), or `"auto"` (on when the popup is wide enough) |
-| `preview_width` | `"auto"` | width of the preview column: a number of columns (`80`) or a percent of the bar (`"50%"`); `"auto"` takes a third of the bar, 28 to 56 columns. The preview never gets narrower than 28 columns or leaves the list fewer than 46 |
+| `preview_width` | `"auto"` | width of the preview column: a number of columns (`80`), a percent of the bar (`"50%"`), or `"auto"` (a third of the bar, 28 to 56 columns). An object `{"dynamic": true, "large_preview_column_threshold": 240, "large_preview_width": "50%"}` is `"auto"` on bars narrower than the threshold (in columns) and `large_preview_width` from it up, so a full-screen bar splits in half and a smaller one keeps the third; those values are the defaults for keys left out, and `"dynamic": false` is `"auto"` at every size. The preview never gets narrower than 28 columns or leaves the list fewer than 46 |
 | `mouse` | `true` | click and wheel support |
 | `agent_icons` | `"auto"` | Detect the local Herdr Agent Icons Max font; `"font"` forces logos (useful over SSH); `"none"` keeps text labels only |
 | `refresh_ms` | `900` | how often the open bar re-reads the session |

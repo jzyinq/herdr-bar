@@ -15,7 +15,7 @@ use std::path::PathBuf;
 pub struct Config {
     pub preview: Value,
     /// How wide the preview column is: columns, a percent of the bar, or auto.
-    pub preview_width: PreviewWidth,
+    pub preview_width: PreviewSize,
     pub mouse: bool,
     pub agent_icons: Value,
     pub refresh_ms: i128,
@@ -57,9 +57,42 @@ fn py_int(value: &Value) -> Option<i128> {
     }
 }
 
-/// `preview_width`: a whole number of columns (`80`) or a percent of the
+/// What `preview_width` asks for: one width at every bar size, or a
+/// `dynamic` one that is automatic below a threshold and large from it up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreviewSize {
+    Fixed(PreviewWidth),
+    Dynamic { threshold: isize, large: PreviewWidth },
+}
+
+pub const LARGE_PREVIEW_THRESHOLD: isize = 240;
+pub const LARGE_PREVIEW_WIDTH: PreviewWidth = PreviewWidth::Percent(50);
+
+/// `preview_width`: a width (see `width`), or an object
+/// `{"dynamic": true, "large_preview_column_threshold": 240,
+/// "large_preview_width": "50%"}` whose keys are all optional.
+/// `"dynamic": false` is automatic at every size.
+fn preview_size(value: Option<&Value>) -> PreviewSize {
+    let Some(Value::Dict(fields)) = value else {
+        return PreviewSize::Fixed(width(value));
+    };
+    if fields.get("dynamic").map(|v| v.is_false()).unwrap_or(false) {
+        return PreviewSize::Fixed(PreviewWidth::Auto);
+    }
+    let threshold = match fields.get("large_preview_column_threshold") {
+        Some(Value::Int(columns)) if *columns >= 0 => (*columns).min(i16::MAX as i128) as isize,
+        _ => LARGE_PREVIEW_THRESHOLD,
+    };
+    let large = match width(fields.get("large_preview_width")) {
+        PreviewWidth::Auto => LARGE_PREVIEW_WIDTH,
+        set => set,
+    };
+    PreviewSize::Dynamic { threshold, large }
+}
+
+/// A preview width: a whole number of columns (`80`) or a percent of the
 /// bar's inner width (`"50%"`, 1 to 100). Anything else is auto.
-fn preview_width(value: Option<&Value>) -> PreviewWidth {
+fn width(value: Option<&Value>) -> PreviewWidth {
     match value {
         Some(Value::Int(columns)) if *columns >= 1 => PreviewWidth::Columns((*columns).min(i16::MAX as i128) as isize),
         Some(Value::Str(text)) => text
@@ -102,7 +135,7 @@ impl Config {
         let actions = get("actions").map(|v| v.is_true()).unwrap_or(false);
         Config {
             preview: or("preview", Value::str("auto")),
-            preview_width: preview_width(get("preview_width")),
+            preview_width: preview_size(get("preview_width")),
             mouse: get("mouse").map(|v| v.truthy()).unwrap_or(true),
             agent_icons: or("agent_icons", Value::str("auto")),
             refresh_ms,
@@ -151,6 +184,15 @@ impl Config {
     /// Whether the preview is showing before anyone presses ^o.
     pub fn preview_starts_on(&self) -> bool {
         !self.preview.is_false()
+    }
+
+    /// The preview width for a bar this many columns wide.
+    pub fn preview_size(&self, bar_width: isize) -> PreviewWidth {
+        match self.preview_width {
+            PreviewSize::Fixed(width) => width,
+            PreviewSize::Dynamic { threshold, large } if bar_width >= threshold => large,
+            PreviewSize::Dynamic { .. } => PreviewWidth::Auto,
+        }
     }
 
     /// Whether the popup is wide enough to split a preview column off it.
@@ -241,12 +283,46 @@ mod tests {
 
     #[test]
     fn preview_width_takes_columns_or_a_percent() {
-        assert_eq!(Config::default().preview_width, PreviewWidth::Auto);
-        assert_eq!(with("preview_width", "80").preview_width, PreviewWidth::Columns(80));
-        assert_eq!(with("preview_width", "\"50%\"").preview_width, PreviewWidth::Percent(50));
-        assert_eq!(with("preview_width", "\"100%\"").preview_width, PreviewWidth::Percent(100));
-        for value in ["0", "-3", "4.5", "true", "null", "\"80\"", "\"%\"", "\"0%\"", "\"101%\"", "\"-5%\"", "\" 50%\"", "\"auto\""] {
-            assert_eq!(with("preview_width", value).preview_width, PreviewWidth::Auto, "preview_width = {}", value);
+        let fixed = |value: &str| with("preview_width", value).preview_width;
+        assert_eq!(Config::default().preview_width, PreviewSize::Fixed(PreviewWidth::Auto));
+        assert_eq!(fixed("80"), PreviewSize::Fixed(PreviewWidth::Columns(80)));
+        assert_eq!(fixed("\"50%\""), PreviewSize::Fixed(PreviewWidth::Percent(50)));
+        assert_eq!(fixed("\"100%\""), PreviewSize::Fixed(PreviewWidth::Percent(100)));
+        for value in ["0", "-3", "4.5", "true", "null", "[]", "\"80\"", "\"%\"", "\"0%\"", "\"101%\"", "\"-5%\"", "\" 50%\"", "\"auto\""] {
+            assert_eq!(fixed(value), PreviewSize::Fixed(PreviewWidth::Auto), "preview_width = {}", value);
         }
+        assert_eq!(with("preview_width", "80").preview_size(60), PreviewWidth::Columns(80));
+    }
+
+    #[test]
+    fn a_dynamic_preview_width_is_large_only_from_the_threshold() {
+        let config = with(
+            "preview_width",
+            r#"{"dynamic": true, "large_preview_column_threshold": 200, "large_preview_width": 90}"#,
+        );
+        assert_eq!(config.preview_size(199), PreviewWidth::Auto);
+        assert_eq!(config.preview_size(200), PreviewWidth::Columns(90));
+        assert_eq!(config.preview_size(330), PreviewWidth::Columns(90));
+    }
+
+    #[test]
+    fn a_dynamic_preview_width_fills_in_missing_or_bad_keys() {
+        let defaults = PreviewSize::Dynamic { threshold: LARGE_PREVIEW_THRESHOLD, large: LARGE_PREVIEW_WIDTH };
+        for value in [
+            r#"{}"#,
+            r#"{"dynamic": true}"#,
+            r#"{"dynamic": "yes"}"#,
+            r#"{"large_preview_column_threshold": -1, "large_preview_width": "auto"}"#,
+            r#"{"large_preview_column_threshold": "240", "large_preview_width": "0%"}"#,
+        ] {
+            assert_eq!(with("preview_width", value).preview_width, defaults, "preview_width = {}", value);
+        }
+    }
+
+    #[test]
+    fn dynamic_false_keeps_the_preview_automatic() {
+        let config = with("preview_width", r#"{"dynamic": false, "large_preview_column_threshold": 100, "large_preview_width": "50%"}"#);
+        assert_eq!(config.preview_width, PreviewSize::Fixed(PreviewWidth::Auto));
+        assert_eq!(config.preview_size(330), PreviewWidth::Auto);
     }
 }
