@@ -8,11 +8,14 @@
 use crate::app::SCOPES;
 use crate::pyjson::{self, Map, Value};
 use crate::pystr;
+use crate::render::PreviewWidth;
 use std::path::PathBuf;
 
 #[derive(Clone, Debug)]
 pub struct Config {
     pub preview: Value,
+    /// How wide the preview column is: columns, a percent of the bar, or auto.
+    pub preview_width: PreviewWidth,
     pub mouse: bool,
     pub agent_icons: Value,
     pub refresh_ms: i128,
@@ -54,6 +57,22 @@ fn py_int(value: &Value) -> Option<i128> {
     }
 }
 
+/// `preview_width`: a whole number of columns (`80`) or a percent of the
+/// bar's inner width (`"50%"`, 1 to 100). Anything else is auto.
+fn preview_width(value: Option<&Value>) -> PreviewWidth {
+    match value {
+        Some(Value::Int(columns)) if *columns >= 1 => PreviewWidth::Columns((*columns).min(i16::MAX as i128) as isize),
+        Some(Value::Str(text)) => text
+            .strip_suffix('%')
+            .filter(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()))
+            .and_then(|digits| digits.parse::<isize>().ok())
+            .filter(|percent| (1..=100).contains(percent))
+            .map(PreviewWidth::Percent)
+            .unwrap_or(PreviewWidth::Auto),
+        _ => PreviewWidth::Auto,
+    }
+}
+
 fn strings(value: Option<&Value>) -> Vec<String> {
     match value {
         Some(Value::List(items)) => items
@@ -83,6 +102,7 @@ impl Config {
         let actions = get("actions").map(|v| v.is_true()).unwrap_or(false);
         Config {
             preview: or("preview", Value::str("auto")),
+            preview_width: preview_width(get("preview_width")),
             mouse: get("mouse").map(|v| v.truthy()).unwrap_or(true),
             agent_icons: or("agent_icons", Value::str("auto")),
             refresh_ms,
@@ -216,6 +236,17 @@ mod tests {
         assert!(with("actions", "true").actions);
         for value in ["false", "\"true\"", "1", "null"] {
             assert!(!with("actions", value).actions, "actions = {}", value);
+        }
+    }
+
+    #[test]
+    fn preview_width_takes_columns_or_a_percent() {
+        assert_eq!(Config::default().preview_width, PreviewWidth::Auto);
+        assert_eq!(with("preview_width", "80").preview_width, PreviewWidth::Columns(80));
+        assert_eq!(with("preview_width", "\"50%\"").preview_width, PreviewWidth::Percent(50));
+        assert_eq!(with("preview_width", "\"100%\"").preview_width, PreviewWidth::Percent(100));
+        for value in ["0", "-3", "4.5", "true", "null", "\"80\"", "\"%\"", "\"0%\"", "\"101%\"", "\"-5%\"", "\" 50%\"", "\"auto\""] {
+            assert_eq!(with("preview_width", value).preview_width, PreviewWidth::Auto, "preview_width = {}", value);
         }
     }
 }

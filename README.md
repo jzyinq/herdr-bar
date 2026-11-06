@@ -380,6 +380,7 @@ Optional. Write `config.json` in the plugin config directory
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `preview` | `"auto"` | `true`, `false` (hidden until `ctrl+o`), or `"auto"` (on when the popup is wide enough) |
+| `preview_width` | `"auto"` | width of the preview column: a number of columns (`80`) or a percent of the bar (`"50%"`); `"auto"` takes a third of the bar, 28 to 56 columns. The preview never gets narrower than 28 columns or leaves the list fewer than 46 |
 | `mouse` | `true` | click and wheel support |
 | `agent_icons` | `"auto"` | Detect the local Herdr Agent Icons Max font; `"font"` forces logos (useful over SSH); `"none"` keeps text labels only |
 | `refresh_ms` | `900` | how often the open bar re-reads the session |
@@ -408,7 +409,8 @@ See [Agent icons at a glance](#agent-icons-at-a-glance) for font setup.
 Detection cannot verify your terminal's active font mapping; if you see boxes,
 check the mapping or set `"agent_icons": "none"`. Unknown agents keep text labels.
 
-Popup size lives in herdr, not here. Override the manifest's `74%` × `62%` per
+Popup size lives in herdr, not here; `preview_width` only splits the popup
+between the list and the preview. Override the manifest's `74%` × `62%` per
 invocation with `herdr plugin pane open --plugin herdr-bar --entrypoint bar
 --placement popup --width 60% --height 50%`.
 

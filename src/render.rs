@@ -39,6 +39,17 @@ pub const MIN_LIST: isize = 46;
 pub const PREVIEW_MIN: isize = 28;
 pub const PREVIEW_MAX: isize = 56;
 
+/// How wide the preview column is asked to be: `Auto` takes a third of the
+/// bar between `PREVIEW_MIN` and `PREVIEW_MAX`; a fixed width in columns or a
+/// percent of the bar's inner width is held to at least `PREVIEW_MIN` and at
+/// most what leaves the list `MIN_LIST`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreviewWidth {
+    Auto,
+    Columns(isize),
+    Percent(isize),
+}
+
 /// An item plus where the query landed in it.
 #[derive(Clone, Debug)]
 pub struct Row {
@@ -58,7 +69,7 @@ pub struct Layout {
     pub preview_width: isize,
 }
 
-pub fn compute_layout(width: isize, height: isize, preview: bool) -> Layout {
+pub fn compute_layout(width: isize, height: isize, preview: bool, preview_size: PreviewWidth) -> Layout {
     let rules = height >= 8;
     let footer = height >= 6;
     let list_top = if rules { 2 } else { 1 };
@@ -69,7 +80,11 @@ pub fn compute_layout(width: isize, height: isize, preview: bool) -> Layout {
     let mut list_width = inner;
     let separator = pystr::len(SEPARATOR) as isize;
     if preview && inner >= PREVIEW_MIN + MIN_LIST + separator {
-        preview_width = PREVIEW_MAX.min(PREVIEW_MIN.max(inner / 3));
+        preview_width = match preview_size {
+            PreviewWidth::Auto => PREVIEW_MAX.min(PREVIEW_MIN.max(inner / 3)),
+            PreviewWidth::Columns(columns) => columns.clamp(PREVIEW_MIN, inner - MIN_LIST - separator),
+            PreviewWidth::Percent(percent) => (inner * percent / 100).clamp(PREVIEW_MIN, inner - MIN_LIST - separator),
+        };
         list_width = inner - preview_width - separator;
     }
     Layout { list_top, list_height, rules, footer, inner_width: inner, list_width, preview_width }
@@ -682,8 +697,8 @@ mod tests {
 
     #[test]
     fn preview_only_appears_when_there_is_room() {
-        let narrow = compute_layout(70, 20, true);
-        let wide = compute_layout(140, 20, true);
+        let narrow = compute_layout(70, 20, true, PreviewWidth::Auto);
+        let wide = compute_layout(140, 20, true, PreviewWidth::Auto);
         assert_eq!(narrow.preview_width, 0);
         assert!(wide.preview_width > 0);
         assert_eq!(wide.list_width + wide.preview_width + 3, wide.inner_width);
@@ -691,14 +706,42 @@ mod tests {
 
     #[test]
     fn disabled_preview_gives_the_list_everything() {
-        let layout = compute_layout(140, 20, false);
+        let layout = compute_layout(140, 20, false, PreviewWidth::Auto);
         assert_eq!(layout.preview_width, 0);
         assert_eq!(layout.list_width, layout.inner_width);
     }
 
     #[test]
+    fn a_fixed_preview_width_is_taken_as_asked() {
+        let layout = compute_layout(200, 20, true, PreviewWidth::Columns(90));
+        assert_eq!(layout.preview_width, 90);
+        assert_eq!(layout.list_width + layout.preview_width + 3, layout.inner_width);
+    }
+
+    #[test]
+    fn a_percent_preview_width_follows_the_bar() {
+        let layout = compute_layout(202, 20, true, PreviewWidth::Percent(50));
+        assert_eq!(layout.preview_width, 100);
+        assert_eq!(layout.list_width + layout.preview_width + 3, layout.inner_width);
+    }
+
+    #[test]
+    fn a_set_preview_width_keeps_the_list_and_preview_minimums() {
+        for size in [PreviewWidth::Columns(500), PreviewWidth::Percent(90)] {
+            let layout = compute_layout(120, 20, true, size);
+            assert_eq!(layout.list_width, MIN_LIST, "{:?}", size);
+            assert_eq!(layout.list_width + layout.preview_width + 3, layout.inner_width);
+        }
+        for size in [PreviewWidth::Columns(5), PreviewWidth::Percent(1)] {
+            assert_eq!(compute_layout(200, 20, true, size).preview_width, PREVIEW_MIN, "{:?}", size);
+        }
+        // Too narrow for any preview: the list still gets everything.
+        assert_eq!(compute_layout(70, 20, true, PreviewWidth::Columns(40)).preview_width, 0);
+    }
+
+    #[test]
     fn tiny_popups_still_render_a_list() {
-        let layout = compute_layout(20, 3, true);
+        let layout = compute_layout(20, 3, true, PreviewWidth::Auto);
         assert!(layout.list_height >= 1);
         assert!(!layout.rules);
     }

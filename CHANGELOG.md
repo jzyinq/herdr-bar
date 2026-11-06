@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add `preview_width` (default `"auto"`) to size the preview column: a number
+  of columns (`80`) or a percent of the bar (`"50%"`). The preview keeps at
+  least 28 columns and the list at least 46; `"auto"` keeps the third of the
+  bar, 28 to 56 columns, it always took.
+
 - Add OpenCode as an `auto_titles` source (#29). OpenCode prints `OpenCode`
   until the session has a title, and `OC | <title>` after that, so the title is
   read from the terminal title Herdr already reports and no transcript is
